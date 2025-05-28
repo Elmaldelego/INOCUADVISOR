@@ -1,8 +1,11 @@
+import os
+import shutil
 import requests
 import logging
 import ftfy
 import sys
-
+from open_webui.internal.db import Base, JSONField, get_db
+from sqlalchemy import BigInteger, Column, String, Text, JSON
 from langchain_community.document_loaders import (
     AzureAIDocumentIntelligenceLoader,
     BSHTMLLoader,
@@ -195,9 +198,9 @@ class Loader:
         self.kwargs = kwargs
 
     def load(
-        self, filename: str, file_content_type: str, file_path: str
+        self, filename: str, file_content_type: str, file_path: str, user_id: str = None
     ) -> list[Document]:
-        loader = self._get_loader(filename, file_content_type, file_path)
+        loader = self._get_loader(filename, file_content_type, file_path, user_id)
         docs = loader.load()
 
         return [
@@ -212,16 +215,36 @@ class Loader:
             file_content_type and file_content_type.find("text/") >= 0
         )
 
-    def _get_loader(self, filename: str, file_content_type: str, file_path: str):
-        file_ext = filename.split(".")[-1].lower()
+    def _get_loader(self, filename: str, file_content_type: str, file_path: str, user_id: str = None):
+    file_ext = filename.split(".")[-1].lower()
 
-        if (
-            self.engine == "external"
-            and self.kwargs.get("EXTERNAL_DOCUMENT_LOADER_URL")
-            and self.kwargs.get("EXTERNAL_DOCUMENT_LOADER_API_KEY")
-        ):
-            loader = ExternalDocumentLoader(
-                file_path=file_path,
+    if file_ext in ["csv"] or file_content_type == "text/csv":
+        if user_id:
+            new_filename = f"data{user_id}.csv"
+            destination_path = f"/app/backend/data/{new_filename}"
+            shutil.move(file_path, destination_path)
+            log.info(f"Archivo CSV movido a {destination_path}")
+            return CSVLoader(destination_path, autodetect_encoding=True)
+        else:
+            log.warning(f"User ID no proporcionado para CSV: {filename}")
+            return CSVLoader(file_path, autodetect_encoding=True)
+
+    elif file_ext in ["xls", "xlsx"] or file_content_type in [
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ]:
+        if user_id:
+            new_filename = f"data{user_id}.{file_ext}"
+            destination_path = f"/app/backend/data/{new_filename}"
+            shutil.move(file_path, destination_path)
+            log.info(f"Archivo Excel movido a {destination_path}")
+            return UnstructuredExcelLoader(destination_path)
+        else:
+            log.warning(f"User ID no proporcionado para Excel: {filename}")
+            return UnstructuredExcelLoader(file_path)
+
+
+ 
                 url=self.kwargs.get("EXTERNAL_DOCUMENT_LOADER_URL"),
                 api_key=self.kwargs.get("EXTERNAL_DOCUMENT_LOADER_API_KEY"),
                 mime_type=file_content_type,
